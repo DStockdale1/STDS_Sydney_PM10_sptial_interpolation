@@ -1,0 +1,135 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+Time series on PM2.5 and PM 10 
+Using hourly data from 2016 to 2020
+
+```{r}
+rm(list = ls(all.names = TRUE))
+```
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(leaflet)
+library(gdata)
+library(imputeTS)
+library(magrittr)
+library(stringr)
+library(thief)
+library(forecast)
+```
+
+Import data
+```{r}
+load("C:/Users/Declan/Documents/STDS Assignment 3/AQI Data/2021_monthly.Rda") 
+
+load("C:/Users/Declan/Documents/STDS Assignment 3/AQI Data/working_databse/Air Quality Site Details.Rda")
+
+load("C:/Users/Declan/Documents/DataScience/Air pollution copy before redownloading/AQI_2016_2020_condensed_v2.Rda") 
+```
+
+```{r}
+working_aqi_dataset = merge(AQI_2016_2020_work,df_site_details, by='Site_Id')
+
+rm("AQI_2016_2020_work")
+```
+
+```{r}
+colnames(working_aqi_dataset)
+```
+Removing columns that aren't interesting
+```{r}
+working_aqi_dataset <- subset(working_aqi_dataset,                               select=-c(Site_Id,AirQualityCategory, Parameter.ParameterDescription, Parameter.UnitsDescription))
+```
+
+```{r}
+unique(working_aqi_dataset$Parameter.ParameterCode)
+```
+```{r}
+unique(working_aqi_dataset$Region)
+```
+
+Remove pollutants and other variables
+```{r}
+PM2.5<-subset(working_aqi_dataset,
+              Parameter.ParameterCode=="PM2.5")
+PM2.5$date_time <- as.POSIXct(paste(PM2.5$Date, PM2.5$Hour),format = "%Y-%m-%d %H") 
+PM2.5<-subset(PM2.5, select = -c(Date, Hour,Longitude, Latitude, Parameter.ParameterCode))#Date, Hour,
+                                                
+
+PM10<-subset(working_aqi_dataset,
+             Parameter.ParameterCode=="PM10")
+PM10$date_time <- as.POSIXct(paste(PM10$Date, PM10$Hour),format = "%Y-%m-%d %H")
+PM10<-subset(PM10, select = -c(Longitude, Latitude,  Parameter.ParameterCode))#Date, Hour,
+```
+
+test
+```{r}
+test <- subset(PM10, select=-c(Region))
+test <- spread(test,SiteName, Value)
+```
+
+```{r}
+colSums(is.na(test)) 
+#colSums(is.na(tb_eastsyd_1)) 
+#colSums(is.na(tb_swsyd_1)) 
+#colSums(is.na(tb_upperhunter_1)) 
+#colSums(is.na(tb_nwsyd_1)) 
+```
+Going to be using earlwood station for PM10
+```{r}
+randwick_pm10 <- subset(test, select= c(date_time, RANDWICK))
+```
+
+```{r}
+imp <- na_kalman(randwick_pm10$RANDWICK)
+randwick_pm10_impute <-ts(data.frame(randwick_pm10$date_time,imp),frequency = 24*365.25)
+randwick_pm10_ts <- ts(randwick_pm10,frequency = 24*365.25)
+```
+
+```{r}
+str(randwick_pm10_ts)
+```
+
+
+
+```{r}
+#randwick_pm10_ts[,]
+```
+
+```{r}
+#ggplot_na_distribution(randwick_pm10_ts[,2])
+ggplot_na_imputations(randwick_pm10_ts[,2], randwick_pm10_impute[,2])
+```
+
+following on from Rob Hydman post using thief package
+
+```{r}
+what<-USAccDeaths
+fc <- thief(USAccDeaths)
+autoplot(fc)
+```
+```{r}
+what
+```
+
+```{r}
+a <-AEdemand
+```
+
+```{r}
+#y <- msts(randwick_pm10_impute[imp],seasonal.periods=c(24, 7*24))
+```
+
+```{r}
+total <- randwick_pm10_impute[,2]
+```
+
+
+
+
+

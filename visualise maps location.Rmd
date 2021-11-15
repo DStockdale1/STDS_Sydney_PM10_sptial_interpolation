@@ -1,0 +1,161 @@
+---
+title: "Data analysis"
+output: html_notebook
+---
+
+Libraries
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(leaflet)
+library(magrittr)
+```
+
+merging datasets
+```{r}
+AQI_2015_2020_df = load("C:/Users/Declan/Documents/DataScience/Air pollution copy before redownloading/AQI_2016_2020_condensed_v2.Rda") 
+
+site_details = load("C:/Users/Declan/Documents/DataScience/Air pollution copy before redownloading/Datasets to merge/Raw Data/AQI Data/Air Quality Site Details.Rda")
+```
+
+```{r}
+working_aqi_dataset = merge(AQI_2016_2020_work,df_site_details, by='Site_Id')
+```
+
+```{r}
+working_aqi_dataset %>%
+  data.frame
+  mutate(working_aqi_dataset=as.Date(working_aqi_dataset, 
+                                      format= "%d.%m.%Y"))
+```
+
+
+
+```{r}
+subset_aqi_dataset<-subset(working_aqi_dataset, 
+                           Parameter.ParameterCode!="OZONE"&
+                           Parameter.ParameterCode!="NO" &
+                           Parameter.ParameterCode!="NO2" &
+                           Parameter.ParameterCode!="SO2")
+```
+
+Remove QLD,VIC ad SA stations
+```{r}
+# remove non NSW locations
+df_site_details_NSW <- df_site_details %>% 
+  subset(SiteName != "Moolawatana" ) %>% 
+  subset(SiteName != "Lameroo" ) %>% 
+  subset(SiteName != "Werrimull" ) %>% 
+  subset(SiteName != "Walpeup" ) %>% 
+  subset(SiteName != "Wycheproof" ) %>% 
+  subset(SiteName != "Loddon Plains") 
+
+df_site_details_NSW <- df_site_details_NSW %>%
+  drop_na() %>%
+  group_by(Latitude, Longitude)
+```
+
+```{r}
+# creates bounds for leaflet of NSW
+map_lat_range <- range(df_site_details_NSW$Latitude)
+map_long_range <- range(df_site_details_NSW$Longitude)
+
+aqi_bounds_south <-  floor(map_lat_range[1]) # south
+aqi_bounds_west <- floor(map_long_range[1]) # west
+aqi_bounds_north <- ceiling(map_lat_range[2]) #nor
+aqi_bounds_east <- ceiling(map_long_range[2]) #east
+```
+
+```{r}
+# creating the aqi_map NSW
+aqi_map_NSW <- leaflet() %>%
+  addTiles() %>%
+  fitBounds(aqi_bounds_west, aqi_bounds_south,aqi_bounds_east,aqi_bounds_north) %>%
+  addMarkers(df_site_details_NSW$Longitude, 
+            df_site_details_NSW$Latitude, 
+            popup = df_site_details_NSW$SiteName)
+
+aqi_map_NSW
+```
+Subset to only easternstations arond sydney
+```{r}
+orange_coord <-filter(df_site_details, SiteName == 'ORANGE') 
+Longitude_limit <-orange_coord$Longitude
+
+ulladulla_coord <-filter(df_site_details, SiteName == 'Ulladulla') 
+lat_min <-ulladulla_coord$Latitude
+
+merriwa_coor <-filter(df_site_details, SiteName == 'MERRIWA') 
+lat_max <-merriwa_coor$Latitude
+
+
+nsw_east_aqi_dataset<-subset(df_site_details, Longitude >= Longitude_limit) 
+
+nsw_east_aqi_dataset<-subset(nsw_east_aqi_dataset, Latitude >= lat_min) 
+
+nsw_east_aqi_dataset<-subset(nsw_east_aqi_dataset, Latitude <= lat_max) 
+```
+
+
+```{r}
+# adding markers
+aqi_map <- leaflet() %>%
+  addTiles() %>%
+  addMarkers(nsw_east_aqi_dataset$Longitude, 
+             nsw_east_aqi_dataset$Latitude, 
+             popup = nsw_east_aqi_dataset$SiteName) 
+aqi_map
+```
+```{r}
+# creates bounds for leaflet of NSW
+aqi_lat_range_NSW_EAST <- range(df_site_details_NSW_EAST$Latitude)
+aqi_long_range_NSW_EAST <- range(df_site_details_NSW_EAST$Longitude)
+
+aqi_bounds_NSW_EAST_south <-  floor(aqi_lat_range_NSW_EAST[1])
+aqi_bounds_NSW_EAST_west <- floor(aqi_long_range_NSW_EAST[1])
+aqi_bounds_NSW_EAST_north <- ceiling(aqi_lat_range_NSW_EAST[2])
+aqi_bounds_NSW_EAST_east <- ceiling(aqi_long_range_NSW_EAST[2])
+```
+
+```{r}
+# creating the aqi_map
+aqi_map_NSW_EAST <- leaflet() %>%
+  addTiles() %>%
+  fitBounds(aqi_bounds_NSW_EAST_west, 
+            aqi_bounds_NSW_EAST_south, 
+            aqi_bounds_NSW_EAST_east, 
+            aqi_bounds_NSW_EAST_north) %>%
+  addMarkers(df_site_details_NSW_EAST$Longitude, 
+             df_site_details_NSW_EAST$Latitude, 
+             popup = df_site_details_NSW_EAST$SiteName) 
+
+aqi_map_NSW_EAST
+```
+Working NSW dataset
+```{r}
+NSW_API <- subset_aqi_dataset %>% 
+  subset(SiteName != "Moolawatana" ) %>% 
+  subset(SiteName != "Lameroo" ) %>% 
+  subset(SiteName != "Werrimull" ) %>% 
+  subset(SiteName != "Walpeup" ) %>% 
+  subset(SiteName != "Wycheproof" ) %>% 
+  subset(SiteName != "Loddon Plains") 
+```
+
+```{r}
+NSW_API_EAST <- subset(subset_aqi_dataset, Longitude > Longitude_limit)
+```
+
+```{r}
+str(NSW_API_EAST)
+```
+```{r}
+#trng aggregate function
+
+NSW_API_EAST %>%
+  group_by(NSW_API_EAST$Date) %>%
+  summarise_at(vars(NSW_API_EAST$Value),list(name = mean))
+```
+

@@ -1,0 +1,54 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+rm(list = ls(all.names = TRUE))
+```
+
+
+2014 to 2021
+```{r}
+#setwd("C:/Users/Declan/Documents/DataScience/Air-Pollution-STDS/")
+
+all.files = c("AQI Data/2014.Rda",
+              "AQI Data/2015.Rda",
+              "AQI Data/2016.Rda",
+              "AQI Data/2017.Rda",
+              "AQI Data/2018.Rda",
+              "AQI Data/2019.Rda",
+              "AQI Data/2020.Rda",
+              "AQI Data/2021.Rda")
+```
+
+```{r}
+#setwd("C:/Users/Declan/Documents/DataScience/STDS-Assignmet 3/")
+
+mylist<- lapply(all.files, function(x) {
+  load(file = x)
+  get(ls()[ls()!= "filename"])
+}) 
+
+AQI_2014_2021<- do.call("rbind", mylist)
+```
+Drop useless information
+```{r}
+col_drop <- c("Parameter.Frequency",
+              "Parameter.SubCategory",
+              "Parameter.Category",
+              "Parameter.Units",
+              "DeterminingPollutant",
+              "HourDescription",
+              "Parameter.ParameterDescription",
+              "Parameter.UnitsDescription")
+
+AQI_2014_2021 <- AQI_2014_2021[ ,!names(AQI_2014_2021)%in% col_drop]
+```
+
+```{r}
+AQI_2014_2021<-subset(AQI_2014_2021, Parameter.ParameterCode %in% c("PM2.5", "PM2.5d", "PM10", "PM10d"))
+```
+
+```{r}
+save(AQI_2014_2021, file = "AQI Data/working_databse/AQI_2014_2021_condensed.Rda")
+```

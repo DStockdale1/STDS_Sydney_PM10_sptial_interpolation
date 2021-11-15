@@ -1,0 +1,111 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+Editing SWOQ data for use in main file
+
+```{r}
+rm(list = ls(all.names = TRUE))
+```
+
+```{r}
+library(stringr)
+library(sp)
+library(gstat)
+library(dplyr) # for "glimpse"
+library(ggplot2)
+library(scales) # for "comma"
+library(magrittr)
+library(tidyr)
+library(imputeTS)
+library(automap)
+```
+
+
+```{r}
+#SWOQ<-read.csv(file = "C:/Users/Declan/Documents/STDS Assignment 3/AQI Data/2021-04-30_Cleaned.csv")
+
+#save(SWOQ, file = "C:/Users/Declan/Documents/STDS Assignment 3/AQI Data/SWOQ_cleaned.Rda")
+```
+
+```{r}
+load("C:/Users/Declan/Documents/STDS Assignment 3/AQI Data/SWAQ_cleaned.Rda")
+```
+
+```{r}
+colnames(SWOQ)
+```
+
+
+Remove non PM10 columns
+```{r}
+SWOQ_PM10 <- subset(SWOQ, select=c(Time,
+                                 OEHS_PM10,
+                                 LUDD_PM10,
+                                 BROO_PM10,
+                                 GLEN_PM10,
+                                 KURN_PM10,
+                                 LEPP_PM10,
+                                 UNSW_PM10))
+```
+Only want time on the hour
+```{r}
+toDelete <- seq(1, nrow(SWOQ_PM10), 3)
+SWOQ_PM10<-SWOQ_PM10[toDelete ,]
+```
+
+get date in proper format
+```{r}
+SWOQ_PM10$Date <-as.Date(SWOQ_PM10$Time, format = "%Y-%m-%d")
+SWOQ_PM10$Hour <-str_sub(SWOQ_PM10$Time, 12, 13) #select hour value
+
+#SWOQ_PM10$date_time <- as.POSIXct(paste(SWOQ_PM10$Date, SWOQ_PM10$Hour),format = "%Y-%m-%d%H", tz='GMT')
+
+SWOQ_PM10 <-SWOQ_PM10[,-1]
+```
+
+date, value, sitename_lat,Long, Region
+```{r}
+SWOQ_PM10 <- SWOQ_PM10 %>%
+  select(Date, Hour, everything())
+
+#SWOQ_PM10 <- SWOQ_PM10[,-9:-10]
+colnames(SWOQ_PM10) <- c("Date","Hour","Chullora","Luddenham",
+                         "Brookvale", "Glenorie", "Kurnell", 
+                         "Leppington", "UNSW")
+```
+
+```{r}
+SWOQ_gather<-gather(SWOQ_PM10, Chullora, Luddenham, Brookvale, Glenorie, Kurnell,Leppington,UNSW)
+
+colnames(SWOQ_gather) <- c("Date", "Hour","SiteName","Value")
+```
+
+```{r}
+SWOQ_gather_1<-SWOQ_gather %>%
+  mutate(Longitude = case_when(
+    (SiteName== "Chullora") ~ "151.0460133",
+    (SiteName== "Luddenham") ~ "150.6918441",
+    (SiteName== "Brookvale") ~ "151.2706266",
+    (SiteName== "Glenorie") ~ "151.0069077",
+    (SiteName== "Kurnell") ~ "151.2046102",
+    (SiteName== "Leppington") ~ "150.8106364",
+    (SiteName == "UNSW") ~ "151.232912"
+    ))
+
+SWOQ_gather_1<-SWOQ_gather_1 %>%
+  mutate(Latitude = case_when(
+    (SiteName== "Chullora") ~ "-33.8915297",
+    (SiteName== "Luddenham") ~ "-33.8814147",
+    (SiteName== "Brookvale") ~ "-33.7610924",
+    (SiteName== "Glenorie") ~ "-33.5994777",
+    (SiteName== "Kurnell") ~ "-34.0099519",
+    (SiteName== "Leppington") ~ "-33.9593216",
+    (SiteName == "UNSW") ~ "-33.916105"
+    ))
+
+SWOQ_gather_1$Region <-'School'
+```
+
+
+

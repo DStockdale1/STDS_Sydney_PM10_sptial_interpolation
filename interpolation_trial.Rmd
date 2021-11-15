@@ -1,0 +1,316 @@
+---
+title: "R Notebook"
+output:
+
+---
+
+
+## Introduction
+
+
+
+Trying various interpolation methods IDW/kriging at one point in time
+
+```{r}
+rm(list = ls(all.names = TRUE))
+```
+
+```{r}
+#base packages
+library(tidyverse)
+library(sf) 
+library(sp) 
+library(raster)
+
+# geostatistics packages 
+library(gstat) 
+library(automap)
+
+#plotting packages
+library(patchwork)
+library(viridis)
+
+library(scales)
+```
+
+what i want is to pick a few hours on one day where the fires started to get bad
+I want to create a variogram at each time point
+To do this l'l need n dataframes, one for each hour
+
+Each dataframe will have an x coord, y coord, PM10 value (maybe PM2.5 or another)
+
+
+Import data
+```{r}
+load("C:/Users/Declan/Documents/STDS Assignment 3/AQI Data/working_databse/Combine_data_AQI_SWOQ_PM10_2019_2020_hourly.Rda")
+
+load("C:/Users/Declan/Documents/STDS Assignment 3/AQI Data/working_databse/station_details_added_SWOQ.Rda")
+
+load("C:/Users/Declan/Documents/STDS Assignment 3/AQI Data/working_databse/station_details_added_SWOQ.Rda")
+```
+
+Select Date 
+```{r}
+chosen_date<-subset(Combine_data_AQI_SWOQ_PM10_2019_2020_hourly, Date=="2019-12-25")
+chosen_date<-subset(chosen_date, Hour==12)
+```
+
+Change date time
+```{r}
+chosen_date$date_time <- as.POSIXct(paste(chosen_date$Date, chosen_date$Hour),format = "%Y-%m-%d%H", tz='GMT')
+
+chosen_date<- subset(chosen_date, select = -c(Date, Hour))
+```
+
+spread to do a count sum - don't select stations will more than 2 missing
+```{r}
+chosen_date_spread<- subset(chosen_date,select = -c(Longitude, Latitude,Region)) 
+chosen_date_spread <- spread(chosen_date_spread,SiteName, Value)
+
+chosen_date_spread<-chosen_date_spread[, colSums(is.na(chosen_date_spread)) <= 0]
+```
+
+impute missing values after rounding to 0
+```{r}
+chosen_date_spread[,-1][chosen_date_spread[,-1] <=0] <- 0    
+#chosen_date_spread_imp <- na_kalman(chosen_date_spread)
+#chosen_date_spread_imp<-chosen_date_spread
+```
+
+```{r}
+station_value <- gather(chosen_date_spread, date_time) # ordered by hour
+```
+
+Change col names
+```{r}
+colnames(station_value) <- c("SiteName", "PM10")
+```
+
+```{r}
+station_details<-subset(station_details, select = c(SiteName,Longitude,Latitude))
+```
+
+```{r}
+hour_1_final <- left_join(station_value, station_details, by = "SiteName")
+hour_1_final <- hour_1_final[,-1]
+```
+
+
+Following this tutorial
+
+https://stackoverflow.com/questions/51501256/plotting-empirical-and-fitted-semivariogram-in-ggplot
+
+Setting this up is the issue
+Adding more here---
+```{r}
+hour_1_final_tibble<-as.tibble(hour_1_final)
+```
+
+```{r}
+hour_1_final_sf <- st_as_sf(hour_1_final_tibble, coords = c("Longitude", "Latitude"), crs = "") %>% # testcrs = '+init=epsg:4326') %>% 
+  cbind(st_coordinates(.))
+```
+
+```{r}
+# We will discuss later, what Z~1 does actually mean in this context
+my_v_emp_OK <- gstat::variogram(
+  PM10~1,
+  as(hour_1_final_sf, "Spatial") # switch from {sf} to {sp}
+  )
+
+
+plot(my_v_emp_OK)
+```
+
+```{r}
+#vgm1.fit = fit.variogram(my_v_emp_OK, model = vgm(1, "Sph", 900, 1))
+#vgm1.fit
+
+
+my_v_emp_OK.fit = fit.variogram(my_v_emp_OK, model = vgm(1, "Sph", 0.15, 40))
+my_v_emp_OK.fit
+
+plot(my_v_emp_OK, my_v_emp_OK.fit)
+```
+
+```{r}
+# automap's autofitVariogram actually produces more info than we need.
+# I will only keep the var_model part.
+my_v_mod_OK <- automap::autofitVariogram(PM10~1, as(hour_1_final_sf, "Spatial"))$var_model
+
+# To inspect the automatic fit that was chosen for us we can use
+# automap's excellent build in methods for base::plot
+plot(automap::autofitVariogram(PM10~1, as(hour_1_final_sf, "Spatial")))
+```
+
+Can also find variogram now that cooridnates are sp
+
+```{r}
+hour_1_final_grd_100_sf <- hour_1_final_sf %>% 
+  st_bbox() %>% 
+  st_as_sfc() %>% 
+  st_make_grid(
+  cellsize = c(0.005, 0.005), # 100m pixel size
+  what = "centers"
+  ) %>%
+  st_as_sf() %>%
+  cbind(., st_coordinates(.))
+
+hour_1_final_grd_100_sp <- as(hour_1_final_grd_100_sf, "Spatial") # converting to {sp} format
+gridded(hour_1_final_grd_100_sp) <- TRUE             # informing the object that it is a grid
+hour_1_final_grd_100_sp <- as(hour_1_final_grd_100_sp, "SpatialPixels") # specifying what kind of grid
+```
+
+```{r}
+ggplot(data =hour_1_final_grd_100_sf, aes(x = X, y = Y))+
+geom_point(size = 0.5)
+```
+
+
+
+```{r}
+# Ordinary Kriging
+my_OK_hour <- krige(
+  PM10~1,                       # Z is our variable and "~1" means "depends on mean"
+  as(hour_1_final_sf, "Spatial"), # input data in {sp} format
+  hour_1_final_grd_100_sp,                # locations to interpolate at
+  model = my_v_mod_OK           # the variogram model fitted above
+  )
+```
+
+```{r}
+my_OK_hour %>% as.data.frame %>%
+  ggplot(aes(x=coords.x1, y=coords.x2)) + geom_tile(aes(fill=var1.pred)) + coord_equal() +
+  scale_fill_gradient(low = "yellow", high="red") +
+  scale_x_continuous(labels=comma) + scale_y_continuous(labels=comma) +
+  theme_bw()
+```
+
+```{r}
+x <- krige.cv(PM10~1, as(hour_1_final_sf, "Spatial"), my_v_mod_OK, nmax = 100, nfold=17)
+bubble(x, "residual", main = "PM10: Leave on one residuals")
+
+```
+```{r}
+kriging_result = autoKrige(PM10~1, as(hour_1_final_sf, "Spatial"), hour_1_final_grd_100_sp)
+```
+```{r}
+plot(kriging_result)
+```
+
+
+
+```{r}
+#Universal Kriging
+my_UK_hour <- krige(
+  PM10~coords.x1+coords.x2, # Think "Z~X+Y" but {sp} conversion alters variable naming
+  as(hour_1_final_sf, "Spatial"), # input data in {sp} format (`X` --> `coords.x1`)
+  hour_1_final_grd_100_sp,                # locations to interpolate at
+  model = autofitVariogram(  # we need an appropriate variogram fit
+    PM10~X+Y,                   # here we can keep "X+Y" - it's just how it is
+    as(hour_1_final_sf, "Spatial")
+    )$var_model
+  )
+```
+
+```{r}
+my_UK_hour %>% as.data.frame %>%
+  ggplot(aes(x=coords.x1, y=coords.x2)) + geom_tile(aes(fill=var1.pred)) + coord_equal() +
+  scale_fill_gradient(low = "yellow", high="red") +
+  scale_x_continuous(labels=comma) + scale_y_continuous(labels=comma) +
+  theme_bw()
+```
+```{r}
+x <- krige.cv(PM10~1, as(hour_1_final_sf, "Spatial"), model=my_UK_hour,  nfold=17)
+bubble(x, "residual", main = "PM10: Leave one out residuals")
+```
+
+
+
+
+
+```{r}
+my_idwres_hour <- idw(
+  PM10~1,                       # idw also depends on mean
+  as(hour_1_final_sf, "Spatial"), # input data in {sp} format
+  hour_1_final_grd_100_sp,                # locations to interpolate at
+) 
+```
+
+```{r}
+my_idwres_hour %>% as.data.frame %>%
+  ggplot(aes(x=coords.x1, y=coords.x2)) + geom_tile(aes(fill=var1.pred)) + coord_equal() +
+  scale_fill_gradient(low = "yellow", high="red") +
+  scale_x_continuous(labels=comma) + scale_y_continuous(labels=comma) +
+  theme_bw()
+```
+
+```{r}
+df_hour_1_final <-as.data.frame(hour_1_final)
+```
+
+
+```{r}
+p_hour_1_final_hour <- ggplot(
+  data = df_hour_1_final,
+  mapping = aes(x = Latitude, y = Longitude, color = PM10)
+) +
+  geom_point(size = 3) + 
+  scale_color_viridis(option = "B",  limits = c(0, 20)) +
+  ggtitle(label = "Observation PM10 across various stations") +
+  theme_void() +
+    theme(
+      plot.title = element_text(hjust = 0.5)
+    )
+
+p_hour_1_final_hour
+```
+
+```{r}
+library(ozmaps)
+
+sydney_map <- ozmaps::abs_ced %>% filter(NAME %in% c(
+  "Sydney", "Wentworth", "Warringah", "Kingsford Smith", "Grayndler", "Lowe", 
+  "North Sydney", "Barton", "Bradfield", "Banks", "Blaxland", "Reid", 
+  "Watson", "Fowler", "Werriwa", "Prospect", "Parramatta", "Bennelong", 
+  "Mackellar", "Greenway", "Mitchell", "Chifley", "McMahon"
+))
+
+
+ggplot(sydney_map) + 
+  geom_sf(aes(fill = NAME), show.legend = FALSE) + 
+  coord_sf(xlim = c(150.97, 151.3), ylim = c(-33.98, -33.79)) 
+```
+
+```{r}
+Sydney_map <- ozmaps::abs_ced 
+
+#xmin: ymin:  xmax:  ymax: 
+
+p <- ggplot(Sydney_map) + geom_sf()
+p + coord_sf(expand = FALSE, xlim = c(150.5007 , 151.301), ylim = c(-34.30371, -33.61871))111
+```
+```{r}
+library(leaflet)
+
+#aqi_bounds_lat1 <-  floor(aqi_lat_range[1])
+#aqi_bounds_long1 <- floor(aqi_long_range[1])
+#aqi_bounds_lat2 <- ceiling(aqi_lat_range[2])
+#aqi_bounds_long2 <- ceiling(aqi_long_range[2])
+# adding markers`S
+
+aqi_map <- leaflet() %>%
+  
+  fitBounds(150.5007,-34.30371,151.2407,-33.61871 )%>%
+
+  addTiles() %>%
+  addMarkers(station_details$Longitude, 
+             station_details$Latitude, 
+             popup = station_details$SiteName) 
+
+
+aqi_map
+```
+
+
+

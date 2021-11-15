@@ -1,0 +1,292 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+# Trying to get spacetime to work again
+
+```{r}
+rm(list = ls(all.names = TRUE))
+```
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(leaflet)
+library(gdata)
+library(imputeTS)
+library(magrittr)
+library(stringr)
+library(thief)
+library(forecast)
+library(rgdal)
+library(zoo)
+library(reshape2)
+```
+Import data
+```{r}
+load("C:/Users/Declan/Documents/STDS Assignment 3/AQI Data/working_databse/Air Quality Site Details.Rda")
+
+load("C:/Users/Declan/Documents/DataScience/Air pollution copy before redownloading/AQI_2016_2020_condensed_v2.Rda") 
+```
+
+```{r}
+working_aqi_dataset = merge(AQI_2016_2020_work,df_site_details, by='Site_Id')
+
+rm("AQI_2016_2020_work")
+```
+
+Removing columns that aren't interesting
+```{r}
+working_aqi_dataset <- subset(working_aqi_dataset,                               select=-c(Site_Id,AirQualityCategory, Parameter.ParameterDescription, Parameter.UnitsDescription))
+```
+
+```{r}
+#unique(working_aqi_dataset$Region)
+```
+
+```{r}
+#unique(working_aqi_dataset$SiteName)
+```
+
+Select only PM 10
+using GMT as timezone
+```{r}
+PM10<-subset(working_aqi_dataset, Parameter.ParameterCode=="PM10")
+
+PM10 <- PM10[grep("Sydney East|Sydney South-west|Central Coast|Lower Hunter|Upper Hunter|Roadside Monitoring|Sydney North-west|Newcastle Local|Illawarra|Research Monitoring|Central Tablelands",PM10$Region), ]
+           
+
+PM10$date_time <- as.POSIXct(paste(PM10$Date, PM10$Hour),format = "%Y-%m-%d%H", tz='GMT')
+
+PM10<-subset(PM10, select = -c(Longitude, Latitude,  Parameter.ParameterCode))
+```
+
+```{r}
+rm(working_aqi_dataset)
+```
+
+
+spreading the values
+```{r}
+PM10_spread <- subset(PM10, select=-c(Region))
+PM10_spread <- spread(PM10_spread,SiteName, Value)
+```
+
+```{r}
+rm(PM10)
+```
+
+Counting column values
+Total of 24*365.25*5 = 43830 values 
+
+
+
+```{r}
+PM10_spread<-PM10_spread[, colSums(is.na(PM10_spread)) <= 1000]
+```
+
+
+
+#drop first 2 colums date and hour
+```{r}
+PM10_spread <-PM10_spread[,-1:-2] # hour date
+```
+
+Fixing values below 0 and rounding 
+```{r}
+#PM10_spread_dt<-PM10_spread[,1]
+PM10_spread[,-1][PM10_spread[,-1] <=1] <- 1 # returns  0 after taking the log   
+#PM10_spread[,-1]<-log(PM10_spread[,-1]) ->>>>>>>
+PM10_spread[,-1] <-round(PM10_spread[,-1],4)
+```
+
+imputing missing values
+```{r}
+PM10_imp <- na_kalman(PM10_spread)
+```
+
+```{r}
+names(PM10_imp) <- gsub(" ", "_", names(PM10_imp))
+```
+
+```{r}
+rm(PM10_spread)
+```
+
+
+```{r}
+#colnames(PM10_imp)
+```
+
+```{r}
+#qplot(x=final_time, y=PROSPECT, data = PM10_imp)
+```
+As there are numerous missing values in PM2.5, it is going to be dropped. PM10 will include all PM2.5
+
+```{r}
+
+#unzip("C:/Users/Declan/Documents/STDS Assignment 3/nsw_lga_polygon_shp.zip")
+```
+
+```{r}
+#NSWLGA <- readOGR(dsn = "NSW_LGA_POLYGON_shp", layer = "NSW_LGA_POLYGON_shp")
+```
+
+Spatial Temporal stuff
+```{r}
+library(spacetime)
+library(gstat)
+library(automap)
+library(rgdal)
+library(rgeos)
+library(sp)
+#library(raster)
+```
+
+Select only 2019 dates and reindex
+```{r}
+PM10_subset_2019 <- tail(PM10_imp,n = 43848-26304)
+rownames(PM10_subset_2019) <- 1:nrow(PM10_subset_2019)
+PM10_subset_2019<- head(PM10_subset_2019,n = 8760)
+```
+
+Select last year - 2020 and reindex
+```{r}
+PM10_subset_2020 <- tail(PM10_imp,n = 43848-35064)
+rownames(PM10_subset_2020) <- 1:nrow(PM10_subset_2020)
+```
+
+```{r}
+#sapply(PM10_subset_2019, max)
+```
+
+
+```{r}
+subset_df_sites <- df_site_details
+
+subset_df_sites <- subset_df_sites[grep("ABERDEEN|ALBION PARK STH|BARGO|BERESFIELD|BULGA|CAMBERWELL|CAMPBELLTOWN WEST|CARRINGTON|CHULLORA|JERRYS PLAINS|LIVERPOOL|MAISON DIEU|MAYFIELD|MERRIWA|MUSWELLBROOK|MUSWELLBROOK NW|NEWCASTLE|OAKDALE|PROSPECT|RANDWICK|SINGLETON|SINGLETON NW|SINGLETON SOUTH|STOCKTON|WARKWORTH|WYBONG|WYONG",subset_df_sites$SiteName), ]
+```
+
+```{r}
+coordinates(subset_df_sites)<- ~ Longitude + Latitude
+```
+
+```{r}
+proj4string(subset_df_sites) <- CRS("+proj=longlat +ellps=WGS84")
+```
+No missing values
+```{r}
+#colSums(is.na(PM10_subset_2020)) 
+```
+
+
+```{r}
+PM10_2019_zoo <-zoo(PM10_subset_2019[,-1], PM10_subset_2019$date_time)
+PM10_2020_zoo <-zoo(PM10_subset_2020[,-1], PM10_subset_2020$date_time) 
+```
+
+```{r}
+PM10_2019 <- data.frame(vals = as.vector(t(PM10_2019_zoo)))  
+PM10_2020 <- data.frame(vals = as.vector(t(PM10_2020_zoo))) 
+```
+
+```{r}
+  PM10_2019_st <- STFDF(sp = subset_df_sites,                   
+                time = index(PM10_2019_zoo),
+                data = PM10_2019)
+
+PM10_2020_st <- STFDF(sp = subset_df_sites,                   
+                time = index(PM10_2020_zoo),
+                data = PM10_2020)
+```
+
+
+Spacetime graphics
+```{r}
+airPal <- colorRampPalette(c('springgreen1', 'sienna3', 'gray5'))(5)
+  
+stplot(PM10_2019_st[, 1:2],
+       cuts = 5,
+       col.regions = airPal,
+       main = '',
+       edge.col = 'black')
+
+stplot(PM10_2019_st, mode = 'xt',
+       col.regions = colorRampPalette(airPal)(15),
+       scales = list(x = list(rot = 45)),
+       ylab = '', xlab = '', main = '')
+
+stplot(PM10_2019_st, mode = 'ts',
+       xlab = '',
+       lwd = 0.1, col = 'black', alpha = 0.6,
+       auto.key = FALSE)
+```
+
+variogram 
+```{r}
+vario_2019 <- variogramST(vals~1, 
+data=PM10_2019_st, assumeRegular=T)
+
+vario_2020 <- variogramST(vals~1, 
+data=PM10_2020_st)
+
+
+#tunit = "hours",
+#assumeRegular=F #PM10_2019
+```
+
+
+page 50 
+https://reseau-resste.mathnum.inrae.fr//sites/default/files/2020-09/analyzing-spatio-temporal-data.pdf
+```{r}
+variot <- function(model,vario=vario_2019){
+tseq <- seq(0,400,20)
+grid <- expand.grid(seq(0,50000,10),tseq)
+dg <- data.frame(spacelag=grid[,1],timelag=grid[,2])
+table<- variogramSurface(model,dg)
+nx <- length(seq(0,50000,10))
+ny <- length(seq(0,15,1))
+plot(vario[vario$dist==0,5],vario[vario$dist==0,3],ylim=range(c(0,vario[vario$dist==0,3],
+table[table[,1]==0,3]),na.rm=T))
+lines(tseq,table[table[,1]==0,3])
+}
+```
+
+```{r}
+separableModel <- vgmST("separable",space=vgm(0.9,"Exp",100,0.1),
+time=vgm(0.9,"Exp",3.5,0.1),sill=40)
+
+separable_fit <- fit.StVariogram(model=separableModel,object=vario_2019)
+
+plot(vario,separable_fit,all=T,map=F)
+
+```
+
+```{r}
+sill <- 800
+separable_man <- vgmST("separable",
+                       space=vgm(3,"Exp",100,0.01),
+                       time=vgm(1/sill,"Exp",100,19/sill),
+                       sill=sill)
+
+plot(vario,separable_man,all=F,map=F)
+
+variot(separableModel,vario_2019)
+```
+
+```{r}
+
+```
+```{r}
+ProductSum <- vgmST("productSum",space =vgm(9,"Exp",8e3,1),time=vgm(8,"Exp",106,2),k=2)
+ProductSum_fit <- fit.StVariogram(model=ProductSum,object=vario)
+plot(vario,ProductSum_fit,all=T,map=F)
+
+```
+```{r}
+variot(ProductSum,vario)
+
+```
+
